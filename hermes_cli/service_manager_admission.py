@@ -47,7 +47,7 @@ def _home(profile: str) -> Path:
     return get_profile_dir(profile).resolve(strict=True)
 
 
-def enroll(temporary_slot: Path, final_slot: Path, profile: str) -> None:
+def enroll(temporary_slot: Path, final_slot: Path, profile: str, *, launch_guard=None) -> None:
     """Called before native registration publishes the stopped service directory."""
     from hermes_cli.service_manager import _HERMES_UID, _chown_hermes, validate_profile_name
 
@@ -61,6 +61,11 @@ def enroll(temporary_slot: Path, final_slot: Path, profile: str) -> None:
              "profile": profile, "home": str(home), "home_identity": _identity(home),
              "uid": _HERMES_UID if _uid() == 0 else _uid(),
              "launcher_sha256": _launcher(temporary_slot / "run")}
+    if launch_guard is not None:
+        from hermes_cli.service_manager_launch_guard import guard_lock, read_journal
+        with guard_lock(launch_guard, home):
+            read_journal(launch_guard, home)
+        value["launch_guard"] = launch_guard
     path = temporary_slot / ENROLLMENT
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -97,6 +102,10 @@ def admission(slot: Path, profile: str) -> dict:
     expected = {"version": 1, "slot": str(slot), "slot_identity": _identity(slot),
                 "profile": profile, "home": str(home), "home_identity": _identity(home),
                 "uid": _uid(), "launcher_sha256": _launcher(slot / "run")}
+    if "launch_guard" in value:
+        from hermes_cli.service_manager_launch_guard import reference
+        reference(value["launch_guard"], home)
+        expected["launch_guard"] = value["launch_guard"]
     if value != expected:
         raise ValueError("enrollment mismatch")
     current = _process(os.getpid())
@@ -115,9 +124,12 @@ def admission(slot: Path, profile: str) -> dict:
         raise ValueError("current run mismatch")
     if _process(os.getppid()) != parent or _process(os.getpid()) != current:
         raise ValueError("owner changed")
-    return {"launch": current, "supervisor": parent, "slot_identity": expected["slot_identity"],
+    result = {"launch": current, "supervisor": parent, "slot_identity": expected["slot_identity"],
             "home_identity": expected["home_identity"], "launch_profile": profile,
             "runtime_profile_binding_verified": False, "behavior_accepted": False}
+    if "launch_guard" in expected:
+        result["launch_guard"] = expected["launch_guard"]
+    return result
 
 
 def main() -> int:
@@ -126,12 +138,21 @@ def main() -> int:
     parser.add_argument("--profile", required=True)
     args = parser.parse_args()
     try:
-        admission(args.slot, args.profile)
         command = [sys.executable, "-m", "hermes_cli.main"]
         if args.profile != "default":
             command += ["-p", args.profile]
-        # Native PID lock refuses a conflict; enrollment is not replacement authority.
-        os.execv(sys.executable, command + ["gateway", "run"])
+        command += ["gateway", "run"]
+        while True:
+            receipt = admission(args.slot, args.profile)
+            guard = receipt.get("launch_guard")
+            if guard is None:
+                os.execv(sys.executable, command)
+            from hermes_cli.service_manager_launch_guard import guard_lock, held
+            with guard_lock(guard, _home(args.profile)):
+                if not held(guard, _home(args.profile), args.slot):
+                    # Keep the original transaction lock through exec, never read-then-release.
+                    os.execv(sys.executable, command)
+            time.sleep(0.25)
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         print('{"error":"native_launch_admission_refused","behavior_accepted":false}', flush=True)
         return 78

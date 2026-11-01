@@ -134,3 +134,27 @@ transaction hold/release adapter. A wrapper that rewrites the enrolled launcher'
 bytes invalidates its native hash proof and cannot be silently adopted. Genuine
 busy/stopping and restart-wait ticket behavior need real owned activity; this
 zero-turn journey neither manufactures pending work nor claims those gates.
+
+## Opt-in original owner-journal launch guard
+
+New offline registrations may supply `launch_guard={"path": absolute_path,
+"owner": expected_document_owner, "lock": absolute_original_lock_path}` along with native admission and start_now=false.
+The canonical private journal must already exist directly in the selected home,
+be a bounded regular single-link mode0600 file of the runtime UID, and carry that
+owner. The reference is part of native enrollment and its original identify
+receipt. Defaults and unenrolled launches are unchanged; no environment key or
+model tool is added.
+
+Before exec, the after-UID native gate revalidates its kernel/supervisor/slot
+identity and reads the original journal. An optional `launch_hold` uses owner
+`hermes-s6-launch-guard/v1`, the exact slot, SHA256 of enrollment and state held or
+released. Held waits without opening a gateway; release permits normal native
+exec. The existing private original-owner lock is held shared across the final read and exec; reservation writers take it exclusively. A held gate drops the lock before waiting. Lock contention emits only a fixed category and its own PID. Missing/invalid/unsafe journals or unknown holds (including an explicit null hold) refuse. Native only reads
+this owner journal; the concrete owner adapter controls its transaction lock,
+reservation ordering, original cancellation, exact-file recovery and release.
+It adds no task/hold store, expiry, release command or launcher rewrite.
+
+This remains cooperative same-UID control. An owner may not silently replace or
+remove a held original journal. Process interruption and private service proof do
+not establish power-loss durability, independent host installation/recovery or
+shared activation. Canonical maintained release qualification remains required.

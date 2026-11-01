@@ -11,7 +11,7 @@ import traceback
 from e2e_s6_launch_admission import wait_for
 
 
-def journey(root, checks, observations, *, exercise=None):
+def journey(root, checks, observations, *, exercise=None, prepare_enrollment=None):
     root.mkdir(mode=0o700)
     source = Path(__file__).resolve().parents[1]
     default = root / 'p'
@@ -67,7 +67,9 @@ def journey(root, checks, observations, *, exercise=None):
             process = subprocess.Popen(['/command/s6-svscan', str(scan)],
                 env=os.environ.copy(), stdin=subprocess.DEVNULL, stdout=output, stderr=output)
             wait_for(lambda: (scan / '.s6-svscan/control').exists(), 5)
+            guard = prepare_enrollment(default) if prepare_enrollment is not None else None
             manager.register_profile_gateway('default', start_now=False, launch_admission=True,
+                launch_guard=guard,
                 extra_env={'HOME': str(root), 'HERMES_HOME': str(default), 'PYTHONPATH': str(source)})
             wait_for(lambda: _s6_run('s6-svok', str(slot)).returncode == 0, 5)
             _s6_run('s6-svc', '-u', str(slot), check=True)

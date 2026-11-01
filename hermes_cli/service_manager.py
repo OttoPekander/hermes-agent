@@ -612,7 +612,7 @@ class S6ServiceManager:
 
     def register_profile_gateway(
         self, profile: str, *, extra_env: dict[str, str] | None = None, start_now: bool = True,
-        launch_admission: bool = False
+        launch_admission: bool = False, launch_guard: dict | None = None
     ) -> None:
         """Create the s6 service directory and ``s6-svscanctl -a`` so it is picked up immediately.
 
@@ -620,6 +620,8 @@ class S6ServiceManager:
         ``gateway start``. Raises ValueError on an invalid name or existing directory, RuntimeError
         if ``s6-svscanctl`` fails.
         """
+        if launch_guard is not None and not launch_admission:
+            raise ValueError("launch guard requires native admission enrollment")
         if launch_admission and start_now:
             raise ValueError("launch admission enrollment requires start_now=False")
         svc_dir = self._service_dir(profile)
@@ -657,7 +659,7 @@ class S6ServiceManager:
             if launch_admission:
                 from hermes_cli.service_manager_admission import enroll
 
-                enroll(tmp_dir, svc_dir, profile)
+                enroll(tmp_dir, svc_dir, profile, launch_guard=launch_guard)
             tmp_dir.rename(svc_dir)
         except Exception:
             shutil.rmtree(tmp_dir, ignore_errors=True)
