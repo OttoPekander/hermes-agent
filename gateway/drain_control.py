@@ -94,6 +94,7 @@ def pause_if_idle_verb(runner, loop, *, binding_reader=None) -> Callable[[dict],
         def _decide() -> None:
             with gate:
                 if not box:
+                    book.phase(identity, 'decision_entered')
                     if binding_reader is None:
                         box.append(pause_if_idle(runner, params.get("target")))
                     else:
@@ -102,6 +103,7 @@ def pause_if_idle_verb(runner, loop, *, binding_reader=None) -> Callable[[dict],
             done.set()
 
         loop.call_soon_threadsafe(_decide)
+        book.phase(identity, 'queued')
         done.wait(timeout=5.0)
         with gate:
             if not box:
@@ -111,6 +113,8 @@ def pause_if_idle_verb(runner, loop, *, binding_reader=None) -> Callable[[dict],
                     box[0]['non_admission'] = proof
         result = {**box[0], "pid": os.getpid()}
         book.complete(identity, result)
+        if result.get('non_admission') is not None:
+            book.phase(identity, 'timeout_complete')
         return result
 
     _handler.observe = book.observe

@@ -177,3 +177,13 @@ This is non-admission evidence, not positive binding/activation authority. The
 consumer must compare its original request and current exact native binding,
 retain owner cancellation and refuse uncertain/missing proof. Records are lost
 on native exit; that absence cannot release an interrupted transaction.
+
+Original ID-bearing requests emit fixed `native_idle_phase` INFO records through
+the existing bounded gateway diagnostic log: registered, queued,
+decision_entered, timeout_complete. Each contains only protocol, fixed phase,
+canonical request digest and original native kernel/runtime identity. Phases
+never regress; legacy calls emit none. Decision entry is recorded before the
+idle check, and timeout completion only after the same-gate negative completion
+is stored. Disabled/unavailable logs establish no phase evidence. Diagnostic
+records are not grants or substitutes for `idle-admission-result`; live hold
+release still requires the original completion and exact current-run checks.

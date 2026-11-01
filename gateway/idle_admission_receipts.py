@@ -4,11 +4,14 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
 
 _REQUEST_ID = re.compile(r'[0-9a-f]{32}')
+_LOG = logging.getLogger(__name__)
+_PHASES = {'registered': 0, 'queued': 1, 'decision_entered': 2, 'timeout_complete': 3}
 
 
 def request_digest(params):
@@ -48,8 +51,23 @@ class IdleRequestBook:
                 return None, {'pausing': False, 'request_replayed': True}
             if len(self.requests) >= 128:
                 return None, {'pausing': False, 'request_capacity_refused': True}
-            self.requests[identity] = {'digest': digest, 'run': run, 'complete': False, 'proof': None}
+            self.requests[identity] = {'digest': digest, 'run': run, 'complete': False, 'proof': None, 'phase': None}
+        self.phase(identity, 'registered')
         return identity, None
+
+    def phase(self, identity, phase):
+        if identity is None:
+            return
+        rank = _PHASES[phase]
+        with self.lock:
+            record = self.requests[identity]
+            if rank <= _PHASES.get(record['phase'], -1):
+                return
+            record['phase'] = phase
+            event = {'protocol': 1, 'phase': phase, 'request_sha256': record['digest'],
+                     'run': copy.deepcopy(record['run'])}
+            # Existing bounded native diagnostic sink; never proof for the consumer.
+            _LOG.info('native_idle_phase %s', json.dumps(event, sort_keys=True))
 
     def timeout(self, identity):
         if identity is None:
