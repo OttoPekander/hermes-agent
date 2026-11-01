@@ -158,3 +158,22 @@ This remains cooperative same-UID control. An owner may not silently replace or
 remove a held original journal. Process interruption and private service proof do
 not establish power-loss durability, independent host installation/recovery or
 shared activation. Canonical maintained release qualification remains required.
+
+## Original non-admission completion
+
+The original bound idle handler optionally accepts a32hex `request_id`. It keeps
+at most128 content-free request records for its runtime, with no eviction or TTL;
+new IDs refuse at capacity and duplicate IDs never schedule another decision.
+Legacy calls without an ID retain their prior behavior. The original identify
+response advertises `idle_nonadmission_protocol: 1`.
+
+Only the handler's timeout gate, after filling the same box that suppresses a
+late callback, may emit `non_admission` with protocol1, fixed outcome
+`loop_timeout_not_admitted`, original request ID/canonical SHA256 and native
+kernel process identity/runtime instance. `idle-admission-result` reads that
+original completion by exact ID/digest, never creates or repeats a request.
+Pending, missing, overflow, admitted or restarted-run records yield no proof.
+This is non-admission evidence, not positive binding/activation authority. The
+consumer must compare its original request and current exact native binding,
+retain owner cancellation and refuse uncertain/missing proof. Records are lost
+on native exit; that absence cannot release an interrupted transaction.

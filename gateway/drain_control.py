@@ -82,7 +82,13 @@ def pause_if_idle_verb(runner, loop, *, binding_reader=None) -> Callable[[dict],
     thread. A loop that does not take the call within 5s answers busy, and the late call is dropped
     (the first of the two to take the lock decides), so a slow answer never pauses behind the asker."""
 
+    from gateway.idle_admission_receipts import IdleRequestBook
+    book = IdleRequestBook(lambda: runner.session_runtime_descriptor.get('instance_id'))
+
     def _handler(params: dict) -> dict[str, Any]:
+        identity, prior = book.begin(params) if binding_reader is not None else (None, None)
+        if prior is not None:
+            return {**prior, 'pid': os.getpid()}
         gate, box, done = threading.Lock(), [], threading.Event()
 
         def _decide() -> None:
@@ -100,8 +106,14 @@ def pause_if_idle_verb(runner, loop, *, binding_reader=None) -> Callable[[dict],
         with gate:
             if not box:
                 box.append({"pausing": False, "busy": True, "active_work": [], "unanswered": True})
-        return {**box[0], "pid": os.getpid()}
+                proof = book.timeout(identity)
+                if proof is not None:
+                    box[0]['non_admission'] = proof
+        result = {**box[0], "pid": os.getpid()}
+        book.complete(identity, result)
+        return result
 
+    _handler.observe = book.observe
     return _handler
 
 

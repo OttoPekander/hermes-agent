@@ -307,6 +307,7 @@ async def _start_gateway_start_control_socket(runner):
                 payload.get("supervisor"), payload.get("supervisor", "none"))
             from gateway.launch_profile_binding import bind_live_served_profiles
             payload["launch_binding_idle_protocol"] = 1
+            payload["idle_nonadmission_protocol"] = 1
             return bind_live_served_profiles(payload, runner)
         # pause-for-update: the updater asks us to drain + exit (freeing venv handles) vs. a tree-kill
         # (same path as SIGUSR1). Handler runs on the socket executor thread, so marshal onto the loop.
@@ -353,11 +354,12 @@ async def _start_gateway_start_control_socket(runner):
                 result = {"pending": True, "served_profiles": runner.served_profile_names()}
             return {"multiplex": bool(getattr(runner.config, "multiplex_profiles", False)), **result}
 
+        _bound_idle = pause_if_idle_verb(runner, _main_loop, binding_reader=_identify_runtime)
         _control_server = GatewayControlServer(
             verb_handlers={"pause-for-update": _pause_for_update_handler, "identify": _identify_runtime,
                            "pause-if-idle": pause_if_idle_verb(runner, _main_loop),
-                           "pause-if-idle-bound": pause_if_idle_verb(
-                               runner, _main_loop, binding_reader=_identify_runtime),
+                           "pause-if-idle-bound": _bound_idle,
+                           "idle-admission-result": _bound_idle.observe,
                            "rescan-profiles": _rescan_profiles_handler,
                            "migrate-profile-identity": migrate_profile_identity_verb(runner),
                            "unserve-profile": unserve_profile_verb(runner),
