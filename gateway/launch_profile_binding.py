@@ -5,6 +5,7 @@ permission, an activation token, or a new profile/authority store.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 _MAX_PROFILE_BINDINGS = 128
@@ -81,3 +82,34 @@ def _profile_rows(registry, receipt, payload, instance, bots):
                 raise ValueError("authority binding unavailable")
             launch_matches += 1
     return bindings, launch_matches
+
+
+def pause_if_current_binding(runner, params: dict, identify) -> dict:
+    """Consume original current evidence on the idle handler's loop, with no await.
+
+    This is a cooperative same-UID compare-and-pause precondition, not a token
+    grant. Legacy pause-if-idle has its own unchanged updater contract.
+    """
+    from gateway.drain_control import pause_if_idle
+
+    refused = {'pausing': False, 'binding_refused': True, 'binding_protocol': 1}
+    current = identify()
+    receipt = current.get('launch_admission')
+    if (current.get('state') != 'ready' or current.get('launch_supervisor') != 's6'
+            or not isinstance(receipt, dict)
+            or receipt.get('runtime_profile_binding_verified') is not True):
+        return {**refused, 'binding_status': 'unavailable'}
+    expected = params.get('expected_binding')
+    if not isinstance(expected, dict):
+        return {**refused, 'binding_status': 'mismatch'}
+    # JSON types matter: True must not compare equal to epoch 1. Compare every
+    # original field, including complete served set, kernel launch and supervisor.
+    try:
+        supplied = json.dumps(expected, sort_keys=True, separators=(',', ':'), allow_nan=False)
+        observed = json.dumps(receipt, sort_keys=True, separators=(',', ':'), allow_nan=False)
+    except (TypeError, ValueError):
+        return {**refused, 'binding_status': 'mismatch'}
+    if supplied != observed:
+        return {**refused, 'binding_status': 'mismatch'}
+    return {**pause_if_idle(runner, params.get('target')),
+            'binding_status': 'matched', 'binding_protocol': 1}

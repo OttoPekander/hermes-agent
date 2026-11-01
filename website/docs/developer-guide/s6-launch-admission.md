@@ -79,3 +79,35 @@ substitute for the current answering runtime. Retiring live writers, an observed
 draining window, overflow, atomic idle admission, root-to-user enrollment and
 shared activation remain separate qualification gates. The journey does not
 manufacture those states or duplicate the native idle-admission contribution.
+
+## Bound idle consumer prerequisite
+
+The local integration carries the existing native `pause-if-idle` implementation
+from upstream PR144790 (`62e405383bf7de73f9adbeec2e2613bd94501587`). It is an
+unmerged dependency, not an installed runtime pin. The ordinary updater's
+`pause-if-idle` contract remains unchanged.
+
+An original runtime advertising `launch_binding_idle_protocol: 1` also exposes
+`pause-if-idle-bound`. Its parameters are `expected_binding` (the exact original
+`identify.launch_admission` object) and optional update `target`. The handler
+recomputes the original kernel enrollment and complete live served-authority set
+on the gateway loop, compares every JSON field/type, then calls the existing
+native idle decision in that same loop step, with no await in between. Missing,
+unavailable or different evidence returns `pausing: false`, `binding_refused:
+true`, protocol1 and a fixed `binding_status` of `unavailable` or `mismatch`.
+Matching evidence reports `binding_status: matched`; only the native idle decision
+can report `pausing: true`. A matched but busy/stopping response is not acceptance.
+A timeout/unknown response is not permission to replay or publish method bytes.
+
+This is a cooperative same-UID freshness precondition, not authentication, a token
+grant or an independent supervisor hold. Callers must use the bound verb and
+verify its protocol/result; they must never fall back to the legacy updater or
+`pause-for-update` when binding is required. It does not install an Arwen recovery
+adapter, permit shared activation, or clear the held original effect journal.
+
+`scripts/e2e_s6_bound_idle.py` drives genuine missing/partial/wrong-profile,
+removed/re-served-authority and successor refusals through the original private
+native control boundary. Every refusal must leave the same current runtime ready
+with the same complete binding. It deliberately requests no matching pause or
+model turn. Matching admission, busy-work/draining/retiring/overflow, installed
+independent recovery and full activation remain separate qualification gates.
