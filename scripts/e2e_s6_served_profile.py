@@ -11,7 +11,7 @@ import traceback
 from e2e_s6_launch_admission import wait_for
 
 
-def journey(root, checks, observations):
+def journey(root, checks, observations, *, exercise=None):
     root.mkdir(mode=0o700)
     source = Path(__file__).resolve().parents[1]
     default = root / 'p'
@@ -54,6 +54,9 @@ def journey(root, checks, observations):
     assert all(path.resolve().is_relative_to(root) for path in [slot, logger, socket_path])
     assert scan != Path('/run/service') and slot != Path('/run/service/gateway-default')
     assert os.environ['S6_KEEP_ENV'] == '1'
+    assert Path(sys.executable).resolve().is_file()
+    assert Path('/command/s6-svscan').resolve().is_file()
+    assert all((home / 'config.yaml').resolve().is_relative_to(root) for home in [default, named])
     observations['preflight'] = {'service_target_private': True, 'logger_target_private': True,
         'socket_physical_target_private': True, 'container_environment_import_disabled': True,
         'global_service_cli_not_used': True}
@@ -98,6 +101,8 @@ def journey(root, checks, observations):
                 first['pid'], first['start_time'], first['instance_id'])
             assert again['launch_admission']['runtime_profile_binding'] == binding
             checks['repeat_original_read_preserves_run_and_exact_binding'] = True
+            if exercise is not None:
+                exercise(default, slot, manager, first, checks, observations)
     finally:
         try:
             if process is not None:

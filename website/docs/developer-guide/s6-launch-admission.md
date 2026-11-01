@@ -64,3 +64,18 @@ open-directory alias may keep a socket path short while resolving all files into
 the private fixture. No shared `/run/service` lifecycle operation or logger target
 is allowed. This supports the served-profile prerequisite only; root-to-user,
 new-owner fencing, method activation and production remain separate gates.
+
+`scripts/e2e_s6_dynamic_authority.py` uses the same private fixture and native
+control socket to unserve and re-serve its named profile, then stop and start only
+its enrolled private slot. It checks that removal excludes the old authority,
+re-serving preserves the home identity while advancing its epoch, and a successor
+under the same supervisor/enrollment has a different launch/runtime and newer
+profile epochs. Each lifecycle operation is issued once; pending replies are
+reconciled by observation instead of replay. No model turn is requested.
+
+These comparisons qualify observation freshness, not enforcement of a stale-token
+refusal: there is no activation token in this contract. A saved receipt cannot
+substitute for the current answering runtime. Retiring live writers, an observed
+draining window, overflow, atomic idle admission, root-to-user enrollment and
+shared activation remain separate qualification gates. The journey does not
+manufacture those states or duplicate the native idle-admission contribution.
