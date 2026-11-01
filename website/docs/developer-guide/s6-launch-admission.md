@@ -111,3 +111,26 @@ native control boundary. Every refusal must leave the same current runtime ready
 with the same complete binding. It deliberately requests no matching pause or
 model turn. Matching admission, busy-work/draining/retiring/overflow, installed
 independent recovery and full activation remain separate qualification gates.
+
+## Private positive admission and recovery journey
+
+`scripts/e2e_s6_positive_bound_idle.py` reuses the real private multiplexer
+fixture. It applies s6's supported `-O` (once at most) to that private slot,
+verifies the original child remains up with identical binding and wanted-up
+false, then issues exactly one matching `pause-if-idle-bound` request. It requires
+protocol1, matched evidence and actual native pause acceptance, observes the
+original kernel identity gone and the slot held down for two seconds, and
+explicitly brings up only that same private slot. Recovery must produce a new
+launch/runtime and newer epochs for both original homes while preserving their
+identity/config and enrolled launcher bytes and modes. The existing persistent
+`down` file is not removed. No global gateway/service CLI or model turn is used.
+
+The native `detached=False, via_service=True` path exits with service-restart
+status; this journey does not launch a detached helper. The supported s6 command
+is documented at https://skarnet.org/software/s6/s6-svc.html. This is a finite
+same-supervisor hold observation and disposable process recovery. It is not
+supervisor-loss recovery, independently installed host recovery or a method
+transaction hold/release adapter. A wrapper that rewrites the enrolled launcher's
+bytes invalidates its native hash proof and cannot be silently adopted. Genuine
+busy/stopping and restart-wait ticket behavior need real owned activity; this
+zero-turn journey neither manufactures pending work nor claims those gates.
