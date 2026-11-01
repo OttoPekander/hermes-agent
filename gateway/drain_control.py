@@ -16,10 +16,13 @@ import contextlib
 import functools
 import json
 import logging
+import os
 import re
+import threading
+import time
 from datetime import datetime, timezone, UTC
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from gateway.memory_status import _parse_iso
 from hermes_constants import get_hermes_home
@@ -40,6 +43,92 @@ def open_restart_wait(runner) -> None:
         descriptor["drain_reason"] = RESTART_WAIT_REASON
 
 
+#: ``drain.reason`` an owner draining for ``hermes update`` publishes (``pause-for-update``). It sits
+#: beside ``drain_reason``, never in it: that field drives the restart wait's attach rule (#139041).
+UPDATE_DRAIN_CAUSE = "update"
+TARGET_LABEL = re.compile(r"[\w.+-]{1,64}")
+
+
+def mark_update_drain(runner, target: Any = None) -> None:
+    """Record that *runner* drains for an update to *target* (a release tag or short sha)."""
+    descriptor = getattr(runner, "session_runtime_descriptor", None)
+    if descriptor is not None:
+        descriptor["drain_cause"] = UPDATE_DRAIN_CAUSE
+        if isinstance(target, str) and TARGET_LABEL.fullmatch(target):
+            descriptor["drain_target"] = target
+
+
+def pause_if_idle(runner, target: Any = None) -> dict[str, Any]:
+    """Begin the update drain only when *runner* holds no work. Call it ON the gateway loop.
+
+    The work read and the drain flag land in one loop step with no await between them. Every turn
+    admission reads ``_draining`` on this loop, or off it inside a ledger write that counts as work
+    until it returns (``tracked_write``), so no turn is admitted between "idle" and "paused".
+    ``{"pausing": True}``: the drain began. ``{"busy": True, "active_work": [...]}``: work is in
+    flight and nothing changed. ``{"already_stopping": True}``: a drain had already begun."""
+    if getattr(runner, "_draining", False) or getattr(runner, "_restart_task_started", False):
+        return {"pausing": False, "already_stopping": True}
+    from gateway.run_active_work_verb import _delegation_units
+    units = list(runner._describe_active_work()) + _delegation_units(time.time())
+    if units or runner._active_work_count() > 0:
+        return {"pausing": False, "busy": True, "active_work": units}
+    mark_update_drain(runner, target)
+    accepted = bool(runner.request_restart(detached=False, via_service=True))
+    return {"pausing": accepted, "already_stopping": not accepted}
+
+
+def pause_if_idle_verb(runner, loop) -> Callable[[dict], dict[str, Any]]:
+    """The ``pause-if-idle`` control verb: :func:`pause_if_idle` on *loop*, answered on the socket
+    thread. A loop that does not take the call within 5s answers busy, and the late call is dropped
+    (the first of the two to take the lock decides), so a slow answer never pauses behind the asker."""
+
+    def _handler(params: dict) -> dict[str, Any]:
+        gate, box, done = threading.Lock(), [], threading.Event()
+
+        def _decide() -> None:
+            with gate:
+                if not box:
+                    box.append(pause_if_idle(runner, params.get("target")))
+            done.set()
+
+        loop.call_soon_threadsafe(_decide)
+        done.wait(timeout=5.0)
+        with gate:
+            if not box:
+                box.append({"pausing": False, "busy": True, "active_work": [], "unanswered": True})
+        return {**box[0], "pid": os.getpid()}
+
+    return _handler
+
+
+def drain_status(runner, *, work: bool = True) -> Optional[dict[str, Any]]:
+    """Why and where to a draining *runner* goes, and what it still finishes; None when not draining.
+
+    ``reason`` is ``update`` for an update's drain, else the published ``drain_reason`` (``restart_wait``,
+    ``idle_exit``) or ``None`` for a drain that names nothing (``stop()``, a dashboard drain). Clients
+    render it ("Updating to v0.23.1, finishing 1 turn") instead of reading a dead owner.
+    ``waiting_for`` (*work*) counts the units the drain waits on by kind: read it on the gateway loop."""
+    descriptor = getattr(runner, "session_runtime_descriptor", None) or {}
+    if not (getattr(runner, "_draining", False) or descriptor.get("state") == "draining"):
+        return None
+    status: dict[str, Any] = {"reason": descriptor.get("drain_cause") or descriptor.get("drain_reason"),
+                              "target": descriptor.get("drain_target")}
+    if work:
+        kinds: dict[str, int] = {}
+        for unit in runner._describe_active_work():
+            kind = str(unit.get("kind") or "work")
+            kinds[kind] = kinds.get(kind, 0) + 1
+        status["waiting_for"] = kinds
+    return status
+
+
+def update_drain(runner) -> Optional[dict[str, Any]]:
+    """:func:`drain_status` when *runner* drains for an update, else None (a restart or a stop names
+    nothing a client renders). Read it on the gateway loop."""
+    status = drain_status(runner)
+    return status if status and status["reason"] == UPDATE_DRAIN_CAUSE else None
+
+
 def restart_wait_open(runner) -> bool:
     """True while *runner* is in a restart's after-turn wait (draining, not yet stopping)."""
     descriptor = getattr(runner, "session_runtime_descriptor", None) or {}
@@ -47,12 +136,10 @@ def restart_wait_open(runner) -> bool:
             and descriptor.get("drain_reason") == RESTART_WAIT_REASON)
 
 
-# The requests a client needs during that wait to find, open and answer the conversation parked on
-# approval/clarify: the GET reads below (Desktop's session picker, the session detail and its
-# transcript pages, and the health probes) and one write, a Webapp tab's mint of the one-use ticket
-# its /api/ws dial-back needs (restart_wait_socket_ticket). Both only pass the drain's refusal; the
-# listener's auth gate still runs on them. Every other write and route keeps that refusal. The
-# prompt itself (approval.pending / *.respond) rides the WebSocket.
+# The reads a client needs during that wait to find and open the conversation parked on
+# approval/clarify: Desktop's session picker, the session detail and its transcript pages, and the
+# health probes. GET only and still authenticated; every write and every other route keeps the
+# drain's refusal. The prompt itself (approval.pending / *.respond) rides the WebSocket.
 _RESTART_WAIT_READS = re.compile(
     r"/api/(?:health|status|profiles/sessions(?:/sidebar)?"
     r"|sessions/[^/]+(?:/messages(?:/around)?|/timeline)?)")
@@ -62,16 +149,6 @@ def restart_wait_read(runner, method, path) -> bool:
     """True for an allowlisted read request while *runner* is in a restart's after-turn wait."""
     return (method == "GET" and bool(_RESTART_WAIT_READS.fullmatch(path or ""))
             and restart_wait_open(runner))
-
-
-def restart_wait_socket_ticket(runner, method, path, query) -> bool:
-    """True for a gateway-socket ticket mint while *runner* is in a restart's after-turn wait.
-
-    Exempts the request from the drain's refusal only: it does not authenticate it."""
-    from urllib.parse import parse_qs
-    from hermes_cli.web_session_sockets import GATEWAY_SOCKET
-    return (method == "POST" and path == "/api/webapp/socket-ticket"
-            and parse_qs(query or "").get("socket") == [GATEWAY_SOCKET] and restart_wait_open(runner))
 
 # The WebSocket verbs an interactive client may still call during that wait: attach to and read the
 # parked session, answer its prompt (or interrupt the turn so the restart can finish) and commit
