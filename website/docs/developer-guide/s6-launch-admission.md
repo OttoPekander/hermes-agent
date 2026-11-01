@@ -18,11 +18,23 @@ enrollment gives no authority to displace another gateway.
 The original answering gateway's existing local `identify` response can carry
 `launch_admission`. It is recomputed from that answering process and the native
 enrollment, not accepted from a caller or ambient declaration. It names the launch
-profile and marks `runtime_profile_binding_verified` and `behavior_accepted` false.
+profile; the launch-only builder keeps `runtime_profile_binding_verified` false.
+The runtime's original `identify` handler may enrich that receipt from its existing
+live `SessionAuthorities` registry and canonical `local_bots` names. Only a ready,
+non-draining original runtime with an exact matching launch authority can report
+`runtime_profile_binding_verified: true`. Its bounded `runtime_profile_binding`
+names `scope: observed_served_profiles`, the original runtime instance and each
+served profile's canonical name, directory device/inode and native authority epoch.
+The registry is read before/after projection; missing/changed/ambiguous/retiring or
+unavailable authority stays unverified. More than128profiles yields no positive
+partial projection. Saved `served_profiles` status, caller labels and the
+supervisor sentinel cannot establish this binding. `behavior_accepted` stays false.
 Legacy, missing, invalid or inaccessible enrollment yields no positive receipt.
 A verified receipt classifies this launch as supervised `s6`, preserving refusal
-by consumers that support manual owners only. It does not authenticate the full
-multiplex served-profile set or grant permission to stop or replace an owner.
+by consumers that support manual owners only. This is a live observation, not atomic idle admission or a permission to stop,
+replace or activate an owner. It cannot be replayed as a grant; consumers still
+need the original current run, applicable profile scope, cancellation and native
+idle/holdoff fencing. The set may change after this observation.
 
 This is a cooperative same-UID operator contract, not isolation against malicious
 code running as that UID. It is Linux-only and fails closed when proc identity or
@@ -41,3 +53,14 @@ a fresh private short fixture path, and no owner credentials. It uses installed
 container environment. The foreground competitor explicitly uses the documented
 `--no-supervise` route, never the container's global service redirect. It requests
 no model turns and does not establish user-facing activation or production proof.
+
+`scripts/e2e_s6_served_profile.py` exercises one native default multiplexer serving
+an eligible named profile. A new standalone named gateway is refused by current
+native policy and is not a workaround; the journey does not use `--force` or a
+standalone compatibility shim. Markerless homes are not profiles and must not gain
+bindings. Its preflight proves private service/log/socket targets, cleared
+environment and `S6_KEEP_ENV=1` before any supervisor is started. A same-UID Linux
+open-directory alias may keep a socket path short while resolving all files into
+the private fixture. No shared `/run/service` lifecycle operation or logger target
+is allowed. This supports the served-profile prerequisite only; root-to-user,
+new-owner fencing, method activation and production remain separate gates.
